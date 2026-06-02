@@ -1,0 +1,25 @@
+{
+  "name": "El Sistema — Tracker RPG",
+  "short_name": "El Sistema",
+  "description": "Tracker de hábitos con sistema RPG de formas y niveles.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#05080f",
+  "theme_color": "#3fc9ff",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%23050810' width='192' height='192'/><text x='96' y='110' font-family='monospace' font-size='80' fill='%233fc9ff' text-anchor='middle' dominant-baseline='middle' font-weight='bold'>⚔</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%23050810' width='192' height='192'/><text x='96' y='110' font-family='monospace' font-size='80' fill='%233fc9ff' text-anchor='middle' dominant-baseline='middle' font-weight='bold'>⚔</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
