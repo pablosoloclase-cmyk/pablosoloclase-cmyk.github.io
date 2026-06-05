@@ -128,6 +128,42 @@ function catExpOf(d, catId) {
   (d.challenges || []).forEach((c) => { if (c.category === catId && c.done) exp += c.exp; });
   return exp;
 }
+const STREAK_MSGS = [
+  { min:1,  name:'EL SISTEMA',    text:'Un nuevo día comienza.\nCompleta tus misiones.' },
+  { min:3,  name:'EL SISTEMA',    text:'Tres días seguidos.\nEl hábito empieza a forjarse.' },
+  { min:7,  name:'EL SISTEMA',    text:'Una semana perfecta.\nTu nombre se anota en los registros.' },
+  { min:14, name:'EL SISTEMA',    text:'Catorce días sin fisuras.\nLa voluntad se ha vuelto acero.' },
+  { min:21, name:'EL SISTEMA',    text:'Veintiún días.\nEl hábito ya es parte de ti.' },
+  { min:30, name:'EL SISTEMA',    text:'¡MES DE HIERRO completado!\nEres imparable.' },
+  { min:60, name:'SISTEMA S-RANK',text:'Sesenta días.\nPocos cazadores llegan tan lejos.' },
+  { min:100,name:'SISTEMA S-RANK',text:'Cien días de racha.\nCazador de Élite reconocido.' },
+];
+function getStreakMsg(s) { let m = STREAK_MSGS[0]; for (const x of STREAK_MSGS) { if (s >= x.min) m = x; } return m; }
+function drawPortraitCanvas(canvas, auraCol) {
+  const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,64,64);
+  const bg = ctx.createLinearGradient(0,0,0,64);
+  bg.addColorStop(0,'#0d2040'); bg.addColorStop(1,'#060e18');
+  ctx.fillStyle = bg; ctx.fillRect(0,0,64,64);
+  const aura = ctx.createRadialGradient(32,46,4,32,46,22);
+  aura.addColorStop(0,auraCol+'55'); aura.addColorStop(1,'transparent');
+  ctx.fillStyle = aura; ctx.fillRect(0,0,64,64);
+  const S=3,OX=8,OY=4;
+  const px=(c,x,y,w=1,h=1)=>{ ctx.fillStyle=c; ctx.fillRect(OX+x*S,OY+y*S,w*S,h*S); };
+  px('#1a1a22',1,0,8,1); px('#1a1a22',0,1,10,1);
+  px('#f4c8a0',1,2,8,3);
+  px(auraCol,2,3,2,1); px(auraCol,6,3,2,1);
+  px('#fff',2,3,1,1); px('#fff',6,3,1,1);
+  px('#c87060',3,5,4,1);
+  px('#f4c8a0',4,5,2,1);
+  px('#ef8a2b',1,6,8,1); px('#ef8a2b',0,7,10,1); px('#c96f18',2,7,6,1);
+  px('#0a0a14',0,8,10,1); px(auraCol,4,8,2,1);
+  px('#2b4cff',1,9,3,3); px('#2b4cff',6,9,3,3);
+  px('#1832b8',1,12,4,1); px('#1832b8',5,12,4,1);
+  px('#ef8a2b',0,6,1,3); px('#ef8a2b',9,6,1,3);
+  px('#f4c8a0',0,9,1,1); px('#f4c8a0',9,9,1,1);
+  ctx.strokeStyle='#6fd0ff'; ctx.lineWidth=2; ctx.strokeRect(1,1,62,62);
+  ctx.strokeStyle='#1a4060'; ctx.lineWidth=1; ctx.strokeRect(3,3,58,58);
+}
 function gcalLink(task) {
   if (!task.date) return null;
   const ymd = task.date.replace(/-/g, "");
@@ -180,6 +216,11 @@ const CSS = `
 @keyframes flicker{0%,100%{opacity:1}50%{opacity:.86}}
 @keyframes shimmer{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
 @keyframes appear{0%{opacity:0;transform:translateY(14px)}100%{opacity:1;transform:translateY(0)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+@keyframes arrowBounce{0%{transform:translateX(0)}100%{transform:translateX(3px)}}
+@keyframes tokenSpin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+@keyframes trailFade{0%{opacity:.7;transform:translate(-50%,-50%) scale(1)}100%{opacity:0;transform:translate(-50%,-50%) scale(.2)}}
+@keyframes todayGlow{0%,100%{box-shadow:0 0 4px rgba(255,207,77,.4)}50%{box-shadow:0 0 10px rgba(255,207,77,.7)}}
 @keyframes auraPulse{0%,100%{transform:scale(1);opacity:.55}50%{transform:scale(1.14);opacity:.85}}
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
 @keyframes rise{0%{transform:translateY(6px) scale(1);opacity:0}20%{opacity:1}100%{transform:translateY(-46px) scale(.4);opacity:0}}
@@ -337,9 +378,281 @@ function normalize(data) {
   return changed ? { ...data, challenges } : data;
 }
 
+const ACH_RARITIES = [
+  { id:'comun',label:'COMÚN',color:'#7fa8c7' },
+  { id:'inusual',label:'INUSUAL',color:'#5cf08a' },
+  { id:'raro',label:'RARO',color:'#3fc9ff' },
+  { id:'epico',label:'ÉPICO',color:'#b06bff' },
+  { id:'legendario',label:'LEGENDARIO',color:'#ffcf4d' },
+  { id:'mitico',label:'MÍTICO',color:'#ff7ad9' },
+  { id:'absurdo',label:'ABSURDO',color:'#ff5d6c' },
+];
+const ACHIEVEMENTS_DEF = [
+  // RACHA
+  {id:'r1',sec:'racha',icon:'🔥',name:'PRIMER PASO',rarity:'comun',desc:'Completa tu primera misión del día.',check:d=>d.habits.some(h=>(h.done||[]).length>0)},
+  {id:'r2',sec:'racha',icon:'📅',name:'3 DÍAS',rarity:'comun',desc:'Mantén una racha de 3 días.',check:(d,s)=>s>=3},
+  {id:'r3',sec:'racha',icon:'🌊',name:'SEMANA PERFECTA',rarity:'raro',desc:'7 días consecutivos de racha.',check:(d,s)=>s>=7},
+  {id:'r4',sec:'racha',icon:'🌑',name:'MES DE HIERRO',rarity:'epico',desc:'30 días seguidos de racha.',check:(d,s)=>s>=30,prog:(d,s)=>[Math.min(s,30),30]},
+  {id:'r5',sec:'racha',icon:'⚡',name:'100 DÍAS',rarity:'legendario',desc:'100 días de racha sin interrupción.',check:(d,s)=>s>=100,prog:(d,s)=>[Math.min(s,100),100]},
+  {id:'r6',sec:'racha',icon:'🌌',name:'MEDIO AÑO',rarity:'mitico',desc:'180 días de racha.',check:(d,s)=>s>=180,prog:(d,s)=>[Math.min(s,180),180]},
+  {id:'r7',sec:'racha',icon:'♾️',name:'AÑO COMPLETO',rarity:'absurdo',desc:'365 días de racha. Un año entero.',check:(d,s)=>s>=365,prog:(d,s)=>[Math.min(s,365),365]},
+  {id:'r8',sec:'racha',icon:'💎',name:'DIAMANTE',rarity:'legendario',desc:'Completa TODAS las misiones del día durante 7 días seguidos.',check:d=>false},
+  // EXP Y NIVEL
+  {id:'n1',sec:'nivel',icon:'🌱',name:'DESPERTAR',rarity:'comun',desc:'Alcanza el nivel 5.',check:(d,s,info)=>info.level>=5},
+  {id:'n2',sec:'nivel',icon:'⚔️',name:'CAZADOR',rarity:'comun',desc:'Alcanza el nivel 10.',check:(d,s,info)=>info.level>=10},
+  {id:'n3',sec:'nivel',icon:'🔮',name:'ÉLITE',rarity:'raro',desc:'Alcanza el nivel 20.',check:(d,s,info)=>info.level>=20,prog:(d,s,info)=>[Math.min(info.level,20),20]},
+  {id:'n4',sec:'nivel',icon:'🌀',name:'TRASCENDENCIA',rarity:'epico',desc:'Alcanza el nivel 30.',check:(d,s,info)=>info.level>=30,prog:(d,s,info)=>[Math.min(info.level,30),30]},
+  {id:'n5',sec:'nivel',icon:'👁️',name:'MONARCA',rarity:'legendario',desc:'Alcanza el nivel máximo.',check:(d,s,info)=>info.level>=50,prog:(d,s,info)=>[Math.min(info.level,50),50]},
+  {id:'n6',sec:'nivel',icon:'💫',name:'1.000 EXP',rarity:'comun',desc:'Acumula 1.000 EXP en total.',check:(d,s,info,tot)=>tot>=1000,prog:(d,s,info,tot)=>[Math.min(tot,1000),1000]},
+  {id:'n7',sec:'nivel',icon:'⭐',name:'10.000 EXP',rarity:'raro',desc:'Acumula 10.000 EXP en total.',check:(d,s,info,tot)=>tot>=10000,prog:(d,s,info,tot)=>[Math.min(tot,10000),10000]},
+  {id:'n8',sec:'nivel',icon:'🌟',name:'50.000 EXP',rarity:'epico',desc:'Acumula 50.000 EXP en total.',check:(d,s,info,tot)=>tot>=50000,prog:(d,s,info,tot)=>[Math.min(tot,50000),50000]},
+  {id:'n9',sec:'nivel',icon:'🎇',name:'100.000 EXP',rarity:'legendario',desc:'Acumula 100.000 EXP en total.',check:(d,s,info,tot)=>tot>=100000,prog:(d,s,info,tot)=>[Math.min(tot,100000),100000]},
+  {id:'n10',sec:'nivel',icon:'🚀',name:'DÍA DORADO',rarity:'inusual',desc:'Consigue el umbral dorado de EXP en un día.',check:d=>false},
+  // RETOS
+  {id:'c1',sec:'retos',icon:'🎯',name:'PRIMER RETO',rarity:'comun',desc:'Completa tu primer reto.',check:d=>(d.challenges||[]).some(c=>c.done)},
+  {id:'c2',sec:'retos',icon:'📦',name:'5 RETOS',rarity:'comun',desc:'Completa 5 retos en total.',check:d=>(d.challenges||[]).filter(c=>c.done).length>=5,prog:d=>[Math.min((d.challenges||[]).filter(c=>c.done).length,5),5]},
+  {id:'c3',sec:'retos',icon:'🧩',name:'VETERANO',rarity:'raro',desc:'Completa 10 retos en total.',check:d=>(d.challenges||[]).filter(c=>c.done).length>=10,prog:d=>[Math.min((d.challenges||[]).filter(c=>c.done).length,10),10]},
+  {id:'c4',sec:'retos',icon:'🏅',name:'25 RETOS',rarity:'raro',desc:'Completa 25 retos en total.',check:d=>(d.challenges||[]).filter(c=>c.done).length>=25,prog:d=>[Math.min((d.challenges||[]).filter(c=>c.done).length,25),25]},
+  {id:'c5',sec:'retos',icon:'🥇',name:'50 RETOS',rarity:'epico',desc:'Completa 50 retos en total.',check:d=>(d.challenges||[]).filter(c=>c.done).length>=50,prog:d=>[Math.min((d.challenges||[]).filter(c=>c.done).length,50),50]},
+  {id:'c6',sec:'retos',icon:'💯',name:'100 RETOS',rarity:'legendario',desc:'Completa 100 retos en total.',check:d=>(d.challenges||[]).filter(c=>c.done).length>=100,prog:d=>[Math.min((d.challenges||[]).filter(c=>c.done).length,100),100]},
+  {id:'c7',sec:'retos',icon:'⚡',name:'VELOCISTA',rarity:'inusual',desc:'Completa un reto semanal en los primeros 2 días.',check:d=>false},
+  // TAREAS
+  {id:'t1',sec:'tareas',icon:'✍️',name:'PRIMER APUNTE',rarity:'comun',desc:'Crea tu primera tarea en la libreta.',check:d=>(d.tasks||[]).length>0},
+  {id:'t2',sec:'tareas',icon:'✅',name:'TAREA RESUELTA',rarity:'comun',desc:'Completa tu primera tarea.',check:d=>(d.tasks||[]).some(t=>t.done)},
+  {id:'t3',sec:'tareas',icon:'📋',name:'LISTA LIMPIA',rarity:'raro',desc:'Completa todas las tareas del día (mín. 3).',check:d=>{const ts=(d.tasks||[]);return ts.length>=3&&ts.every(t=>t.done);}},
+  {id:'t4',sec:'tareas',icon:'📚',name:'10 TAREAS',rarity:'comun',desc:'Completa 10 tareas en total.',check:d=>(d.tasks||[]).filter(t=>t.done).length>=10,prog:d=>[Math.min((d.tasks||[]).filter(t=>t.done).length,10),10]},
+  {id:'t5',sec:'tareas',icon:'📖',name:'50 TAREAS',rarity:'raro',desc:'Completa 50 tareas en total.',check:d=>(d.tasks||[]).filter(t=>t.done).length>=50,prog:d=>[Math.min((d.tasks||[]).filter(t=>t.done).length,50),50]},
+  {id:'t6',sec:'tareas',icon:'🗄️',name:'100 TAREAS',rarity:'epico',desc:'Completa 100 tareas en total.',check:d=>(d.tasks||[]).filter(t=>t.done).length>=100,prog:d=>[Math.min((d.tasks||[]).filter(t=>t.done).length,100),100]},
+  {id:'t7',sec:'tareas',icon:'🗓️',name:'PLANIFICADOR',rarity:'inusual',desc:'Asigna una tarea a 7 días distintos del calendario.',check:d=>{const ds=new Set((d.tasks||[]).filter(t=>t.date).map(t=>t.date));return ds.size>=7;},prog:d=>{const ds=new Set((d.tasks||[]).filter(t=>t.date).map(t=>t.date));return[Math.min(ds.size,7),7];}},
+  // CATEGORÍAS
+  {id:'k1',sec:'cats',icon:'🏷️',name:'MI PRIMER ÁREA',rarity:'comun',desc:'Crea tu primera categoría.',check:d=>(d.categories||[]).length>0},
+  {id:'k2',sec:'cats',icon:'🗂️',name:'MULTITAREA',rarity:'comun',desc:'Crea 3 categorías distintas.',check:d=>(d.categories||[]).length>=3,prog:d=>[Math.min((d.categories||[]).length,3),3]},
+  {id:'k3',sec:'cats',icon:'📊',name:'ESPECIALISTA',rarity:'raro',desc:'Sube una categoría al rango B.',check:d=>false},
+  {id:'k4',sec:'cats',icon:'👑',name:'MAESTRO',rarity:'epico',desc:'Lleva una categoría al rango SS.',check:d=>false},
+  {id:'k5',sec:'cats',icon:'🌟',name:'SIN LÍMITES',rarity:'legendario',desc:'Alcanza el rango SSS en cualquier categoría.',check:d=>false},
+  {id:'k6',sec:'cats',icon:'🔱',name:'OMNIDOMINANTE',rarity:'mitico',desc:'Todas tus categorías al rango S o superior.',check:d=>false},
+  // PERSONAJE
+  {id:'f1',sec:'nivel',icon:'🧒',name:'NIÑO INTERIOR',rarity:'comun',desc:'Empieza la aventura en tu primera forma.',check:d=>true},
+  {id:'f2',sec:'nivel',icon:'🎨',name:'ARTISTA',rarity:'inusual',desc:'Sube una imagen propia a una forma.',check:d=>(d.stages||[]).some(s=>s.img)},
+  {id:'f3',sec:'nivel',icon:'🌈',name:'CROMÁTICO',rarity:'inusual',desc:'Personaliza aura y pelo de todas tus formas.',check:d=>(d.stages||[]).length>=2&&(d.stages||[]).every(s=>s.aura)},
+  {id:'f4',sec:'nivel',icon:'🔄',name:'MÚLTIPLE',rarity:'raro',desc:'Crea 3 formas personalizadas.',check:d=>(d.stages||[]).length>=3,prog:d=>[Math.min((d.stages||[]).length,3),3]},
+  // USO
+  {id:'u1',sec:'uso',icon:'🎮',name:'BIENVENIDO',rarity:'comun',desc:'Abre El Sistema por primera vez.',check:d=>true},
+  {id:'u2',sec:'uso',icon:'🔧',name:'PERSONALIZADO',rarity:'comun',desc:'Cambia el nombre del cazador.',check:d=>d.hunter!=='CAZADOR'},
+  {id:'u3',sec:'uso',icon:'🎵',name:'AMBIENTADO',rarity:'comun',desc:'Sube tu propia banda sonora.',check:d=>false},
+  {id:'u4',sec:'uso',icon:'🎨',name:'DISEÑADOR',rarity:'inusual',desc:'Cambia el tema de color de la app.',check:d=>d.themeAccent&&d.themeAccent!=='#3fc9ff'},
+  {id:'u5',sec:'uso',icon:'📱',name:'INSTALADO',rarity:'comun',desc:'Instala la app en tu pantalla de inicio.',check:d=>false},
+  // SECRETOS
+  {id:'s1',sec:'secreto',icon:'❓',name:'???',rarity:'mitico',desc:'Logro oculto. Sigue mejorando.',check:d=>false,hidden:true},
+  {id:'s2',sec:'secreto',icon:'❓',name:'???',rarity:'legendario',desc:'Condición secreta. ¿Qué habrá que hacer?',check:d=>false,hidden:true},
+  {id:'s3',sec:'secreto',icon:'❓',name:'FANTASMA',rarity:'mitico',desc:'Completa una misión a las 23:59.',check:d=>false},
+  {id:'s4',sec:'secreto',icon:'❓',name:'???',rarity:'absurdo',desc:'Un logro que casi nadie consigue.',check:d=>false,hidden:true},
+];
+const ACH_SECTIONS = { racha:'⚡ RACHA Y CONSTANCIA', nivel:'✦ EXP, NIVEL Y FORMAS', retos:'◆ RETOS COMPLETADOS', tareas:'✎ LIBRETA Y TAREAS', cats:'◈ MAESTRÍA DE CATEGORÍAS', uso:'🎮 USO DE LA APP', secreto:'★ LOGROS SECRETOS' };
+
+function computeAchievements(data, streak, info, total) {
+  return ACHIEVEMENTS_DEF.map(a => {
+    let unlocked = false;
+    try { unlocked = a.check(data, streak, info, total); } catch(e){}
+    let prog = null;
+    try { if (a.prog) prog = a.prog(data, streak, info, total); } catch(e){}
+    return { ...a, unlocked, prog };
+  });
+}
+
+function StreakPopup({ streak, tasks, stage, onClose }) {
+  const canvasRef = useRef(null);
+  const boardRef = useRef(null);
+  const tokenRef = useRef(null);
+  const [displayNum, setDisplayNum] = useState(0);
+  const [msgText, setMsgText] = useState('');
+  const [showClose, setShowClose] = useState(false);
+  const [progW, setProgW] = useState(0);
+  const [boardBuilt, setBoardBuilt] = useState(false);
+  const today = new Date().toISOString().slice(0,10);
+  const upcoming = (tasks||[]).filter(t=>t.date&&t.date>=today&&!t.done).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5);
+  const auraCol = stage?.aura || '#3fc9ff';
+  const COLS = 7;
+
+  // Construye las casillas del tablero
+  function buildBoardCells(streak) {
+    const DAYS = 30; // siempre muestra 30 casillas (un mes)
+    const rows = Math.ceil(DAYS / COLS);
+    const total = COLS * rows;
+    const path = [];
+    for (let r=0;r<rows;r++) for (let c=0;c<COLS;c++) path.push(r*COLS+(r%2===0?c:COLS-1-c));
+    return { path, total, rows };
+  }
+
+  function getCellCenter(pi, path, boardEl) {
+    const gi = path[pi];
+    const cells = [...boardEl.children];
+    const cell = cells[gi];
+    if (!cell) return null;
+    const br = boardEl.getBoundingClientRect();
+    const cr = cell.getBoundingClientRect();
+    return { x: cr.left-br.left+cr.width/2, y: cr.top-br.top+cr.height/2 };
+  }
+
+  useEffect(() => {
+    // Retrato
+    if (canvasRef.current) drawPortraitCanvas(canvasRef.current, auraCol);
+    // Sonido de apertura
+    try { sfx.open(); } catch(e){}
+    // Barra de progreso
+    const ms=[1,3,7,14,21,30,60,100,180,365];
+    const nxt=ms.find(m=>m>streak)||365; const prv=ms.filter(m=>m<=streak).pop()||1;
+    setTimeout(()=>setProgW(Math.min(100,Math.round((streak-prv)/(nxt-prv)*100))),400);
+    setBoardBuilt(true);
+  }, []);
+
+  // Anima el token después de que el board se haya renderizado
+  useEffect(() => {
+    if (!boardBuilt || !boardRef.current || !tokenRef.current) return;
+    const boardEl = boardRef.current;
+    const token = tokenRef.current;
+    const wrap = boardEl.parentElement;
+    const { path } = buildBoardCells(streak);
+    const STEPS = Math.min(streak, path.length);
+    const SPEED = Math.max(55, 220 - streak*3);
+    let step = 0;
+
+    const pos0 = getCellCenter(0, path, boardEl);
+    if (pos0) { token.style.left=pos0.x+'px'; token.style.top=pos0.y+'px'; token.style.display='block'; }
+
+    const trails = [];
+    function next() {
+      if (step >= STEPS) {
+        // Llegó — cuenta el número y arranca typewriter
+        try { sfx.jingle(); } catch(e){}
+        let cur=0;
+        const iv=setInterval(()=>{ cur=Math.min(cur+1,streak); setDisplayNum(cur); if(cur>=streak) clearInterval(iv); }, Math.max(16,900/streak));
+        const msg=getStreakMsg(streak);
+        let i=0; const txt=msg.text.replace(/\n/g,' · ');
+        const tw=setInterval(()=>{ setMsgText(txt.slice(0,i+1)); i++; if(i>=txt.length){ clearInterval(tw); setTimeout(()=>{ setShowClose(true); try{sfx.blip();}catch(e){} },200); }},36);
+        return;
+      }
+      const pos = getCellCenter(step, path, boardEl);
+      if (pos) {
+        token.style.transition=`left ${SPEED*.8}ms cubic-bezier(.34,1.4,.64,1),top ${SPEED*.8}ms cubic-bezier(.34,1.4,.64,1)`;
+        token.style.left=pos.x+'px'; token.style.top=pos.y+'px';
+        if (step > 0) {
+          const tr = document.createElement('div');
+          tr.style.cssText=`position:absolute;width:4px;height:4px;background:#ffcf4d;transform:translate(-50%,-50%);pointer-events:none;z-index:9;left:${pos.x}px;top:${pos.y}px;clip-path:polygon(50% 0%,100% 50%,50% 100%,0% 50%);animation:trailFade .4s ease-out forwards`;
+          wrap.appendChild(tr); trails.push(tr);
+          setTimeout(()=>tr.remove(),400);
+        }
+        try { if(step%3===0) sfx.tick(); } catch(e){}
+      }
+      step++; setTimeout(next, SPEED);
+    }
+    setTimeout(next, 300);
+    return () => { trails.forEach(t=>{ try{t.remove();}catch(e){} }); };
+  }, [boardBuilt]);
+
+  const { path, total, rows } = buildBoardCells(streak);
+  const getDiff=(d)=>{ if(d===0) return {t:'HOY',c:'#ffcf4d'}; if(d===1) return {t:'MAÑANA',c:'#3fc9ff'}; if(d<=3) return {t:`+${d}d`,c:'#3fc9ff'}; if(d<=7) return {t:`+${d}d`,c:'#7fa8c7'}; return {t:`+${d}d`,c:'#3a5060'}; };
+
+  // Renderiza las casillas en orden de grid (no de path)
+  const cellEls = new Array(total).fill(null);
+  path.forEach((gi, pi) => {
+    const day = pi+1;
+    let bg='#0a1828', border='#1a3050', content=<span style={{fontSize:5,color:'#1a3a5a'}}>{day}</span>;
+    if (day < streak) {
+      bg='rgba(63,201,255,0.1)'; border='rgba(63,201,255,0.4)';
+      content=<><span style={{fontSize:5,color:'#3fc9ff'}}>{day}</span><span style={{fontSize:8,color:day%7===0?'#ffcf4d':'#3fc9ff',display:'block',lineHeight:1}}>{day%7===0?'★':'✓'}</span></>;
+    } else if (day === streak) {
+      bg='rgba(255,207,77,0.18)'; border='#ffcf4d';
+      content=<><span style={{fontSize:5,color:'#ffcf4d'}}>{day}</span><span style={{fontSize:8,color:'#ffcf4d',display:'block',lineHeight:1}}>◈</span></>;
+    } else {
+      bg='#060e18'; border='#0d1e30';
+      content=<span style={{fontSize:5,color:'#1a3050'}}>{day}</span>;
+    }
+    cellEls[gi] = (
+      <div key={gi} style={{ aspectRatio:'1', background:bg, border:`1px solid ${border}`, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', clipPath:'polygon(2px 0%,calc(100% - 2px) 0%,100% 2px,100% calc(100% - 2px),calc(100% - 2px) 100%,2px 100%,0% calc(100% - 2px),0% 2px)', animation:day===streak?'todayGlow 1.2s ease-in-out infinite':undefined }}>
+        {content}
+      </div>
+    );
+  });
+  for (let i=0;i<total;i++) { if(!cellEls[i]) cellEls[i]=<div key={i} style={{aspectRatio:'1',background:'#060e18',border:'1px solid #0d1e30'}}/>; }
+
+  return (
+    <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:'fixed',inset:0,zIndex:200,background:'rgba(0,0,0,0.92)',display:'flex',alignItems:'center',justifyContent:'center',padding:16,backdropFilter:'blur(4px)',overflowY:'auto'}}>
+      <div style={{background:'#08101e',border:'3px solid #6fd0ff',outline:'2px solid #1a4060',outlineOffset:'-5px',boxShadow:'0 0 0 1px #000,0 0 30px rgba(63,201,255,0.15)',borderRadius:2,width:'min(96vw,360px)',fontFamily:"'Press Start 2P',monospace",overflow:'hidden',margin:'auto'}}>
+        {/* Cabecera */}
+        <div style={{background:'linear-gradient(180deg,#0d2240,#091828)',borderBottom:'2px solid #6fd0ff',padding:'8px 14px 7px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <span style={{fontSize:7,color:'#3fc9ff',textShadow:'0 0 8px #3fc9ff',letterSpacing:2}}>◈ INFORME DEL CAZADOR</span>
+          <span style={{fontSize:6,color:'#ffcf4d',border:'1px solid #ffcf4d',padding:'2px 6px'}}>DÍA {streak}</span>
+        </div>
+        <div style={{padding:'12px 14px 14px'}}>
+          {/* Retrato + racha */}
+          <div style={{display:'flex',gap:12,alignItems:'flex-start',marginBottom:12}}>
+            <div style={{flexShrink:0,width:64,height:64,border:'2px solid #6fd0ff',background:'#06101e',position:'relative',overflow:'hidden'}}>
+              <canvas ref={canvasRef} width={64} height={64} style={{display:'block',imageRendering:'pixelated'}}/>
+              <div style={{position:'absolute',inset:0,background:'repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.12) 3px,rgba(0,0,0,0.12) 4px)',pointerEvents:'none'}}/>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:6,color:'#7fa8c7',letterSpacing:2,marginBottom:5}}>RACHA ACTUAL</div>
+              <div style={{display:'flex',alignItems:'baseline',gap:6}}>
+                <span style={{fontSize:38,color:'#ffcf4d',textShadow:'2px 2px 0 #8b5c00',lineHeight:1}}>{displayNum}</span>
+                <span style={{fontSize:6,color:'#7fa8c7'}}>DÍAS</span>
+              </div>
+              <div style={{fontSize:5,color:'#7fa8c7',letterSpacing:1,margin:'7px 0 4px'}}>SIGUIENTE HITO</div>
+              <div style={{height:8,background:'#0a1a2e',border:'1px solid #1a4060',overflow:'hidden'}}>
+                <div style={{height:'100%',width:progW+'%',background:'linear-gradient(90deg,#3fc9ff,#b06bff)',transition:'width 1.2s ease'}}/>
+              </div>
+            </div>
+          </div>
+
+          {/* Tablero serpenteante */}
+          <div style={{fontSize:5.5,color:'#3fc9ff',letterSpacing:2,marginBottom:6,textAlign:'center'}}>◆ CAMINO DEL CAZADOR</div>
+          <div style={{position:'relative',marginBottom:12}}>
+            <div ref={boardRef} style={{display:'grid',gridTemplateColumns:`repeat(${COLS},1fr)`,gap:3}}>
+              {cellEls}
+            </div>
+            <div ref={tokenRef} style={{position:'absolute',display:'none',zIndex:10,pointerEvents:'none',transform:'translate(-50%,-50%)'}}>
+              <div style={{width:16,height:16,background:'#ffcf4d',border:'2px solid #fff',clipPath:'polygon(50% 0%,100% 50%,50% 100%,0% 50%)',boxShadow:'0 0 8px #ffcf4d',animation:'tokenSpin .6s linear infinite'}}/>
+            </div>
+          </div>
+
+          {/* Diálogo typewriter */}
+          <div style={{background:'#060e18',border:'2px solid #6fd0ff',outline:'1px solid #1a4060',outlineOffset:'-3px',padding:'9px 12px',marginBottom:10,minHeight:44,position:'relative'}}>
+            <div style={{fontSize:6,color:'#3fc9ff',letterSpacing:1,marginBottom:5}}>{getStreakMsg(streak).name}</div>
+            <div style={{fontSize:6.5,color:'#dff1ff',lineHeight:2.2,letterSpacing:.5}}>{msgText}</div>
+            {showClose && <span style={{position:'absolute',bottom:6,right:10,fontSize:7,color:'#ffcf4d',animation:'blink .6s step-end infinite'}}>▼</span>}
+          </div>
+
+          {/* Próximas tareas */}
+          {upcoming.length>0&&(<>
+            <div style={{fontSize:5.5,color:'#ffcf4d',letterSpacing:2,marginBottom:7,display:'flex',alignItems:'center',gap:6}}>
+              <span style={{flex:1,height:1,background:'rgba(255,207,77,0.2)',display:'block'}}/>PRÓXIMAS MISIONES<span style={{flex:1,height:1,background:'rgba(255,207,77,0.2)',display:'block'}}/>
+            </div>
+            {upcoming.map(t=>{
+              const diff=Math.round((new Date(t.date+'T12:00:00')-new Date(today+'T12:00:00'))/86400000);
+              const {t:wt,c:wc}=getDiff(diff);
+              return (<div key={t.id} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 8px',border:'1px solid #1a3050',background:'#060e18',marginBottom:3}}>
+                <div style={{width:6,height:6,background:wc,clipPath:'polygon(50% 0%,100% 50%,50% 100%,0% 50%)',flexShrink:0}}/>
+                <span style={{flex:1,fontSize:5.5,color:'#dff1ff',letterSpacing:.5,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.name}</span>
+                <span style={{fontSize:5,color:wc,flexShrink:0}}>{wt}</span>
+              </div>);
+            })}
+          </>)}
+          {upcoming.length===0&&<div style={{fontSize:5.5,color:'#7fa8c7',textAlign:'center',padding:'6px 0',letterSpacing:1}}>SIN EVENTOS PRÓXIMOS</div>}
+
+          {/* Botón */}
+          <button onClick={onClose} style={{width:'100%',background:'linear-gradient(180deg,#0d2240,#091828)',border:'2px solid #6fd0ff',color:'#3fc9ff',fontFamily:"'Press Start 2P',monospace",fontSize:7,letterSpacing:2,padding:11,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:8,marginTop:10,opacity:showClose?1:0,transition:'opacity .3s'}}>
+            COMENZAR EL DÍA <span style={{color:'#ffcf4d',animation:'arrowBounce .5s ease-in-out infinite alternate'}}>►</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [streakPopup, setStreakPopup] = useState(false);
   const [tab, setTab] = useState("objectives");
   const [chPeriod, setChPeriod] = useState("week");
   const [objPeriod, setObjPeriod] = useState("day");
@@ -366,6 +679,8 @@ export default function App() {
   const editCatPending = useRef(null);
   const [draftCat, setDraftCat] = useState(null);
   const [calFilter, setCalFilter] = useState("all");
+  const [achFilter, setAchFilter] = useState("all");
+  const [achModal, setAchModal] = useState(null);
   const catFileInput = useRef(null);
   const prevDayColor = useRef({});
   const prevLevel = useRef(null);
@@ -387,11 +702,24 @@ export default function App() {
       catch { setData(normalize(DEFAULT_DATA)); }
       try { const m = localStorage.getItem(MUSIC_KEY); if (m) setCustomMusic(m); } catch (e) {}
       setLoading(false);
+      // Mostrar popup de racha una vez al día
+      const todayKey = 'el-sistema-popup-' + new Date().toISOString().slice(0,10);
+      if (!localStorage.getItem(todayKey)) {
+        localStorage.setItem(todayKey,'1');
+        setTimeout(()=>setStreakPopup(true), 900);
+      }
     })();
   }, []);
   useEffect(() => { if (loading || !data) return; try { const { customMusic: _cm, ...rest } = data; localStorage.setItem(KEY, JSON.stringify(rest)); } catch (e) {} }, [data, loading]);
+  // Escucha actualizaciones del SW y recarga para coger la nueva versión
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const handler = (e) => { if (e.data?.type === 'SW_UPDATED') window.location.reload(); };
+    navigator.serviceWorker.addEventListener('message', handler);
+    return () => navigator.serviceWorker.removeEventListener('message', handler);
+  }, []);
   // sincroniza el multiplicador global de efectos
-  useEffect(() => { if (data) setSfxVol(data.soundOn !== false ? (data.sfxVol ?? 0.7) : 0); }, [data && data.sfxVol, data && data.soundOn]);
+  useEffect(() => { if (data) setSfxVol(data.soundOn !== false ? (data.sfxVol ?? 0.7) : 0); }, [data]);
   // gestión de la música de fondo
   const musicSrc = customMusic || "bgm.mp3";
   const musicCfg = useRef({ on: true, vol: 0.4 });
@@ -549,6 +877,7 @@ export default function App() {
 
   return (
     <div style={{ ...bdyFont, background: C.bg, minHeight: "100vh", color: C.text, position: "relative", overflow: "hidden", "--glow": C.glow, "--glowin": C.glow.replace("0.55", "0.14") }}>
+      {streakPopup && data && <StreakPopup streak={Math.max(1, streak)} tasks={data.tasks || []} stage={stage} onClose={() => setStreakPopup(false)} />}
       <style>{CSS}</style>
       <input ref={fileInput} type="file" accept="image/*" onChange={onFile} style={{ display: "none" }} />
       <input ref={catFileInput} type="file" accept="image/*" onChange={onCatFile} style={{ display: "none" }} />
@@ -601,19 +930,62 @@ export default function App() {
             {objPeriod === "day" && (<>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}><span style={secTitle}>⚔ MISIONES DIARIAS</span><span style={{ ...bdyFont, fontSize: 16, color: C.textDim }}>{doneToday}/{data.habits.length}</span></div>
             {allDone && <div style={{ textAlign: "center", marginBottom: 12, ...pxFont, fontSize: 9, color: C.green, textShadow: `0 0 10px ${C.green}`, animation: "flicker 1.5s infinite" }}>✦ DÍA COMPLETADO ✦</div>}
-            {data.habits.map((h, i) => { const done = habitDone(h); const dcol = DIFF[h.diff]?.color || C.cyan; const isEd = editingItem === "h" + h.id; return (<Panel key={h.id} accent={done ? C.green : C.cyanDim} style={{ padding: 12, marginBottom: 10, animation: `appear .4s ${i * 0.04}s both` }}><div style={{ display: "flex", alignItems: "center", gap: 12 }}><button onClick={() => toggleHabit(h.id)} style={{ width: 34, height: 34, flexShrink: 0, cursor: "pointer", background: done ? `${C.green}22` : "rgba(0,0,0,.4)", border: `2px solid ${done ? C.green : C.cyan}`, color: done ? C.green : "transparent", boxShadow: done ? `0 0 12px ${C.green}` : "none", ...pxFont, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</button><div style={{ flex: 1, minWidth: 0 }}><div style={{ ...bdyFont, fontSize: 21, lineHeight: 1.1, color: done ? C.textDim : C.text, textDecoration: done ? "line-through" : "none" }}>{h.name}</div><div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}><span style={{ ...pxFont, fontSize: 7, color: dcol, border: `1px solid ${dcol}66`, padding: "2px 4px" }}>{DIFF[h.diff]?.label}</span><span style={{ ...bdyFont, fontSize: 15, color: C.gold }}>+{h.exp} EXP</span>{h.repeat === false && <span style={{ ...pxFont, fontSize: 6.5, color: C.textDim, border: `1px solid ${C.textDim}66`, padding: "2px 4px" }}>1 VEZ</span>}{h.category && catById(h.category) && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, ...bdyFont, fontSize: 14, color: C.textDim }}><CatIcon cat={catById(h.category)} size={13} />{catById(h.category).name}</span>}</div></div>{editMode && <div style={{ display: "flex", flexDirection: "column", gap: 4 }}><button onClick={() => setEditingItem(isEd ? null : "h" + h.id)} style={{ ...pxFont, fontSize: 11, background: isEd ? `${C.gold}22` : "transparent", border: `1px solid ${C.gold}66`, color: C.gold, cursor: "pointer", padding: 5 }}>✎</button><button onClick={() => deleteHabit(h.id)} style={{ ...pxFont, fontSize: 11, background: "transparent", border: "none", color: C.red, cursor: "pointer", padding: 5 }}>✕</button></div>}</div>
-              {editMode && isEd && (<div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
-                <div style={{ ...lbl, marginBottom: 6 }}>NOMBRE</div>
-                <input style={inp} value={h.name} onChange={(e) => editHabit(h.id, { name: e.target.value })} />
-                <div style={{ ...lbl, margin: "10px 0 6px" }}>DIFICULTAD</div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{Object.entries(DIFF).map(([k, v]) => (<button key={k} onClick={() => editHabit(h.id, { diff: k, exp: v.exp })} style={{ ...pxFont, fontSize: 8, padding: "7px 9px", cursor: "pointer", flex: "1 1 0", minWidth: 64, background: h.diff === k ? `${v.color}22` : "rgba(0,0,0,.4)", border: `1px solid ${v.color}${h.diff === k ? "" : "55"}`, color: v.color }}>{v.label}<br /><span style={{ opacity: 0.8 }}>+{v.exp}</span></button>))}</div>
-                <div style={{ ...lbl, margin: "10px 0 6px" }}>REPETICIÓN</div>
-                <div style={{ display: "flex", gap: 6 }}><button onClick={() => editHabit(h.id, { repeat: true })} style={{ ...pxFont, fontSize: 8, padding: "8px 10px", flex: 1, cursor: "pointer", background: h.repeat !== false ? `${C.green}22` : "rgba(0,0,0,.4)", border: `1px solid ${C.green}${h.repeat !== false ? "" : "55"}`, color: C.green }}>CADA DÍA</button><button onClick={() => editHabit(h.id, { repeat: false })} style={{ ...pxFont, fontSize: 8, padding: "8px 10px", flex: 1, cursor: "pointer", background: h.repeat === false ? `${C.gold}22` : "rgba(0,0,0,.4)", border: `1px solid ${C.gold}${h.repeat === false ? "" : "55"}`, color: C.gold }}>UNA VEZ</button></div>
-                <div style={{ ...lbl, margin: "10px 0 2px" }}>CATEGORÍA</div>
-                <CatChips value={h.category} onPick={(id) => editHabit(h.id, { category: id })} />
-                <button onClick={() => setEditingItem(null)} style={{ ...btnPx, width: "100%", marginTop: 12, background: `${C.cyan}22` }}>LISTO</button>
-              </div>)}
-            </Panel>); })}
+            {(() => {
+              // Agrupa hábitos por categoría
+              const groups = [];
+              const withCat = data.habits.filter(h => h.category && catById(h.category));
+              const withoutCat = data.habits.filter(h => !h.category || !catById(h.category));
+              const catsSeen = [];
+              withCat.forEach(h => { if (!catsSeen.includes(h.category)) catsSeen.push(h.category); });
+              catsSeen.forEach(cid => {
+                const cat = catById(cid);
+                const col = cat.dotColor || C.cyan;
+                groups.push({ cat, col, habits: withCat.filter(h => h.category === cid) });
+              });
+              if (withoutCat.length) groups.push({ cat: null, col: C.cyanDim, habits: withoutCat });
+              return groups.map(({ cat, col, habits: gh }, gi) => (
+                <div key={cat ? cat.id : 'none'} style={{ marginBottom: 14 }}>
+                  {cat && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${col}44` }}>
+                      <CatIcon cat={cat} size={14} />
+                      <span style={{ ...pxFont, fontSize: 7, color: col, letterSpacing: 1 }}>{cat.name}</span>
+                      <span style={{ ...bdyFont, fontSize: 14, color: C.textDim, marginLeft: "auto" }}>{gh.filter(h => habitDone(h)).length}/{gh.length}</span>
+                    </div>
+                  )}
+                  {gh.map((h, i) => {
+                    const done = habitDone(h); const dcol = DIFF[h.diff]?.color || C.cyan; const isEd = editingItem === "h" + h.id;
+                    return (<div key={h.id} style={{ background: cat ? `${col}0d` : "transparent", border: `1px solid ${done ? C.green : col}33`, borderRadius: 4, padding: 10, marginBottom: 8, animation: `appear .4s ${(gi * 3 + i) * 0.04}s both` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <button onClick={() => toggleHabit(h.id)} style={{ width: 32, height: 32, flexShrink: 0, cursor: "pointer", background: done ? `${C.green}22` : "rgba(0,0,0,.4)", border: `2px solid ${done ? C.green : col}`, color: done ? C.green : "transparent", boxShadow: done ? `0 0 10px ${C.green}` : "none", ...pxFont, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</button>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ ...bdyFont, fontSize: 20, lineHeight: 1.1, color: done ? C.textDim : C.text, textDecoration: done ? "line-through" : "none" }}>{h.name}</div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}>
+                            <span style={{ ...pxFont, fontSize: 7, color: dcol, border: `1px solid ${dcol}66`, padding: "2px 4px" }}>{DIFF[h.diff]?.label}</span>
+                            <span style={{ ...bdyFont, fontSize: 15, color: C.gold }}>+{h.exp} EXP</span>
+                            {h.repeat === false && <span style={{ ...pxFont, fontSize: 6.5, color: C.textDim, border: `1px solid ${C.textDim}66`, padding: "2px 4px" }}>1 VEZ</span>}
+                          </div>
+                        </div>
+                        {editMode && <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <button onClick={() => setEditingItem(isEd ? null : "h" + h.id)} style={{ ...pxFont, fontSize: 11, background: isEd ? `${C.gold}22` : "transparent", border: `1px solid ${C.gold}66`, color: C.gold, cursor: "pointer", padding: 5 }}>✎</button>
+                          <button onClick={() => deleteHabit(h.id)} style={{ ...pxFont, fontSize: 11, background: "transparent", border: "none", color: C.red, cursor: "pointer", padding: 5 }}>✕</button>
+                        </div>}
+                      </div>
+                      {editMode && isEd && (<div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
+                        <div style={{ ...lbl, marginBottom: 6 }}>NOMBRE</div>
+                        <input style={inp} value={h.name} onChange={(e) => editHabit(h.id, { name: e.target.value })} />
+                        <div style={{ ...lbl, margin: "10px 0 6px" }}>DIFICULTAD</div>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{Object.entries(DIFF).map(([k, v]) => (<button key={k} onClick={() => editHabit(h.id, { diff: k, exp: v.exp })} style={{ ...pxFont, fontSize: 8, padding: "7px 9px", cursor: "pointer", flex: "1 1 0", minWidth: 64, background: h.diff === k ? `${v.color}22` : "rgba(0,0,0,.4)", border: `1px solid ${v.color}${h.diff === k ? "" : "55"}`, color: v.color }}>{v.label}<br /><span style={{ opacity: 0.8 }}>+{v.exp}</span></button>))}</div>
+                        <div style={{ ...lbl, margin: "10px 0 6px" }}>REPETICIÓN</div>
+                        <div style={{ display: "flex", gap: 6 }}><button onClick={() => editHabit(h.id, { repeat: true })} style={{ ...pxFont, fontSize: 8, padding: "8px 10px", flex: 1, cursor: "pointer", background: h.repeat !== false ? `${C.green}22` : "rgba(0,0,0,.4)", border: `1px solid ${C.green}${h.repeat !== false ? "" : "55"}`, color: C.green }}>CADA DÍA</button><button onClick={() => editHabit(h.id, { repeat: false })} style={{ ...pxFont, fontSize: 8, padding: "8px 10px", flex: 1, cursor: "pointer", background: h.repeat === false ? `${C.gold}22` : "rgba(0,0,0,.4)", border: `1px solid ${C.gold}${h.repeat === false ? "" : "55"}`, color: C.gold }}>UNA VEZ</button></div>
+                        <div style={{ ...lbl, margin: "10px 0 2px" }}>CATEGORÍA</div>
+                        <CatChips value={h.category} onPick={(id) => editHabit(h.id, { category: id })} />
+                        <button onClick={() => setEditingItem(null)} style={{ ...btnPx, width: "100%", marginTop: 12, background: `${C.cyan}22` }}>LISTO</button>
+                      </div>)}
+                    </div>);
+                  })}
+                </div>
+              ));
+            })()}
             {adding === "quest" ? (<Panel style={{ padding: 14, marginTop: 4 }}><div style={{ ...lbl, marginBottom: 6 }}>NUEVA MISIÓN DIARIA</div><input style={inp} placeholder="Nombre del hábito..." value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /><div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>{Object.entries(DIFF).map(([k, v]) => (<button key={k} onClick={() => setDraft({ ...draft, diff: k })} style={{ ...pxFont, fontSize: 8, padding: "8px 10px", cursor: "pointer", flex: "1 1 0", minWidth: 70, background: draft.diff === k ? `${v.color}22` : "rgba(0,0,0,.4)", border: `1px solid ${v.color}${draft.diff === k ? "" : "55"}`, color: v.color, boxShadow: draft.diff === k ? `0 0 8px ${v.color}66` : "none" }}>{v.label}<br /><span style={{ opacity: 0.8 }}>+{v.exp}</span></button>))}</div><div style={{ ...lbl, margin: "10px 0 6px" }}>REPETICIÓN</div><div style={{ display: "flex", gap: 6 }}><button onClick={() => setDraft({ ...draft, repeat: true })} style={{ ...pxFont, fontSize: 8, padding: "8px 10px", flex: 1, cursor: "pointer", background: draft.repeat !== false ? `${C.green}22` : "rgba(0,0,0,.4)", border: `1px solid ${C.green}${draft.repeat !== false ? "" : "55"}`, color: C.green }}>CADA DÍA</button><button onClick={() => setDraft({ ...draft, repeat: false })} style={{ ...pxFont, fontSize: 8, padding: "8px 10px", flex: 1, cursor: "pointer", background: draft.repeat === false ? `${C.gold}22` : "rgba(0,0,0,.4)", border: `1px solid ${C.gold}${draft.repeat === false ? "" : "55"}`, color: C.gold }}>UNA VEZ</button></div><CategoryPicker /><div style={{ display: "flex", gap: 8, marginTop: 12 }}><button onClick={addQuest} style={{ ...btnPx, flex: 1, background: `${C.cyan}22` }}>AÑADIR</button><button onClick={() => { setAdding(null); setDraft({ name: "", diff: "D", target: "", unit: "" }); setDraftCat(null); }} style={{ ...btnPx, color: C.textDim, borderColor: `${C.textDim}66` }}>CANCELAR</button></div></Panel>) : (<button onClick={() => { setAdding("quest"); if (sound) sfx.open(); }} style={{ ...btnPx, width: "100%", marginTop: 4, background: "rgba(63,201,255,.05)" }}>＋ NUEVA MISIÓN</button>)}
             <button onClick={() => { setEditMode((e) => !e); setEditingItem(null); }} style={{ ...btnPx, width: "100%", marginTop: 8, fontSize: 8, color: editMode ? C.gold : C.textDim, borderColor: editMode ? C.gold : `${C.textDim}55`, background: "transparent" }}>{editMode ? "✓ TERMINAR EDICIÓN" : "✎ EDITAR"}</button>
             </>)}
@@ -650,6 +1022,25 @@ export default function App() {
           const DAYCOL = { cyan: { bg: "63,201,255", glow: C.glow }, gold: { bg: "255,207,77", glow: C.gold }, red: { bg: "255,93,108", glow: C.red } };
           return (<div style={{ marginTop: 8, animation: "appear .4s both" }}>
             <div style={{ marginBottom: 12 }}><span style={secTitle}>▦ CALENDARIO {calYear}</span></div>
+            {(() => {
+              const todayStr = new Date().toISOString().slice(0,10);
+              const upcoming = (data.tasks || []).filter(t => t.date && t.date >= todayStr && !t.done).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5);
+              if (!upcoming.length) return null;
+              return (<Panel style={{ padding: 12, marginBottom: 12 }}>
+                <div style={{ ...pxFont, fontSize: 7, color: C.gold, letterSpacing: 1, marginBottom: 10 }}>◆ PRÓXIMAS MISIONES</div>
+                {upcoming.map(t => {
+                  const diff = Math.round((new Date(t.date+'T12:00:00') - new Date(todayStr+'T12:00:00'))/86400000);
+                  const col = diff===0 ? C.gold : diff<=3 ? C.cyan : C.textDim;
+                  const label = diff===0?'HOY':diff===1?'MAÑANA':`+${diff}d`;
+                  const cat = t.category ? catById(t.category) : null;
+                  return (<div key={t.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:`1px solid ${C.line}` }}>
+                    <div style={{ width:5,height:5,background:cat?.dotColor||col,borderRadius:'50%',flexShrink:0 }} />
+                    <span style={{ ...bdyFont, fontSize:16, color:C.text, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{t.name}</span>
+                    <span style={{ ...pxFont, fontSize:6, color:col, flexShrink:0 }}>{label}</span>
+                  </div>);
+                })}
+              </Panel>);
+            })()}
             {pickedTask && (<Panel pulse accent={C.gold} style={{ padding: 12, marginBottom: 12 }}>
               <div style={{ ...pxFont, fontSize: 8, color: C.gold, marginBottom: 6 }}>🗓 ASIGNANDO TAREA</div>
               <div style={{ ...bdyFont, fontSize: 19, color: C.text, marginBottom: 4 }}>"{pickedTask.name}"</div>
@@ -975,7 +1366,8 @@ export default function App() {
             </div>
 
             <div style={{ order: 6 }}>
-            <button onClick={() => { if (confirm("¿Reiniciar TODO el progreso? No se puede deshacer.")) { setData(normalize({ ...DEFAULT_DATA })); prevLevel.current = 1; prevStage.current = 0; } }} style={{ ...btnPx, width: "100%", marginTop: 14, fontSize: 8, color: C.red, borderColor: `${C.red}55`, background: `${C.red}0d` }}>⚠ REINICIAR PROGRESO</button>
+            <button onClick={() => setStreakPopup(true)} style={{ ...btnPx, width: "100%", marginTop: 14, fontSize: 8, color: C.cyan, borderColor: `${C.cyan}55`, background: `${C.cyan}0d` }}>◈ VER INFORME DEL DÍA</button>
+            <button onClick={() => { if (confirm("¿Reiniciar TODO el progreso? No se puede deshacer.")) { setData(normalize({ ...DEFAULT_DATA })); prevLevel.current = 1; prevStage.current = 0; } }} style={{ ...btnPx, width: "100%", marginTop: 8, fontSize: 8, color: C.red, borderColor: `${C.red}55`, background: `${C.red}0d` }}>⚠ REINICIAR PROGRESO</button>
             <div style={{ ...bdyFont, fontSize: 15, color: C.textDim, textAlign: "center", marginTop: 16, lineHeight: 1.3 }}>Tu progreso se guarda solo. Personaliza tus<br />formas en la pestaña ☄ FORMAS.</div>
             </div>
           </div>
@@ -983,8 +1375,66 @@ export default function App() {
       </div>
 
       {/* NAV */}
+        {tab === "logros" && (() => {
+          const achs = computeAchievements(data, streak, info, total);
+          const unlocked = achs.filter(a=>a.unlocked).length;
+          const pct = Math.round(unlocked/achs.length*100);
+          const sections = Object.keys(ACH_SECTIONS);
+          return (<div style={{ marginTop: 8, animation: "appear .4s both" }}>
+            <div style={{ marginBottom: 10 }}><span style={secTitle}>★ LOGROS</span></div>
+            <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+              {[['all','TODOS',C.cyan],[unlocked+'','LOGRADOS',C.green],[achs.length+'','TOTAL',C.textDim],[pct+'%','COMPLETADO',C.gold]].map(([v,l,c],i)=>(<div key={i} style={{ flex:1, background:'rgba(0,0,0,.4)', border:`1px solid ${C.line}`, borderRadius:4, padding:'8px 4px', textAlign:'center' }}><div style={{ ...pxFont, fontSize:10, color:c, marginBottom:3 }}>{v}</div><div style={{ ...bdyFont, fontSize:13, color:C.textDim }}>{l}</div></div>))}
+            </div>
+            <div style={{ height:6, background:'rgba(0,0,0,.4)', border:`1px solid ${C.line}`, borderRadius:3, marginBottom:14, overflow:'hidden' }}>
+              <div style={{ height:'100%', width:pct+'%', background:`linear-gradient(90deg,${C.cyan},${C.purple})`, borderRadius:3 }} />
+            </div>
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:14 }}>
+              {['all','unlocked',...sections].map(f=>(<button key={f} onClick={()=>setAchFilter(f)} style={{ ...pxFont, fontSize:6, padding:"6px 7px", cursor:"pointer", background:achFilter===f?`${C.cyan}18`:"rgba(0,0,0,.4)", border:`1px solid ${C.cyan}${achFilter===f?"":"44"}`, color:achFilter===f?C.cyan:C.textDim }}>{f==='all'?'TODO':f==='unlocked'?'LOGRADOS':(ACH_SECTIONS[f]||f).split(' ').slice(1,3).join(' ')}</button>))}
+            </div>
+            {sections.map(sec=>{
+              let items = achs.filter(a=>a.sec===sec);
+              if (achFilter==='unlocked') items=items.filter(a=>a.unlocked);
+              else if (achFilter!=='all'&&achFilter!==sec) return null;
+              if (!items.length) return null;
+              return (<div key={sec}>
+                <div style={{ ...pxFont, fontSize:6.5, color:C.textDim, letterSpacing:2, margin:"18px 0 10px", paddingBottom:6, borderBottom:`1px solid ${C.line}` }}>{ACH_SECTIONS[sec]}</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:8 }}>
+                  {items.map(a=>{
+                    const rar = ACH_RARITIES.find(r=>r.id===a.rarity)||ACH_RARITIES[0];
+                    const isHidden = a.hidden && !a.unlocked;
+                    const pv = a.prog ? Math.min(100,Math.round(a.prog[0]/a.prog[1]*100)) : null;
+                    return (<div key={a.id} onClick={()=>setAchModal(a)} style={{ background:'rgba(0,0,0,.5)', border:`1px solid ${a.unlocked?rar.color:C.line}`, borderRadius:5, padding:"11px 10px", position:"relative", cursor:"pointer", opacity:a.unlocked?1:0.45, filter:a.unlocked?'none':'grayscale(0.5)', overflow:"hidden" }}>
+                      <div style={{ position:"absolute", top:6, right:6, ...pxFont, fontSize:4.5, color:rar.color, border:`1px solid ${rar.color}`, padding:"2px 3px" }}>{rar.label}</div>
+                      <div style={{ fontSize:24, marginBottom:6 }}>{isHidden?'❓':a.icon}</div>
+                      <div style={{ ...pxFont, fontSize:5.5, color:a.unlocked?rar.color:C.textDim, lineHeight:1.7, marginBottom:5 }}>{isHidden?'???':a.name}</div>
+                      <div style={{ ...bdyFont, fontSize:12, color:C.textDim, lineHeight:1.3 }}>{isHidden?'Logro oculto':a.desc}</div>
+                      {pv!==null&&(<><div style={{ marginTop:6, height:4, background:'rgba(0,0,0,.4)', borderRadius:2, overflow:'hidden' }}><div style={{ height:'100%', width:pv+'%', background:rar.color, borderRadius:2 }} /></div><div style={{ ...bdyFont, fontSize:11, color:C.textDim, marginTop:3 }}>{a.prog[0]} / {a.prog[1]}</div></>)}
+                    </div>);
+                  })}
+                </div>
+              </div>);
+            })}
+            {achModal && (() => {
+              const a = achModal;
+              const rar = ACH_RARITIES.find(r=>r.id===a.rarity)||ACH_RARITIES[0];
+              const isHidden = a.hidden && !a.unlocked;
+              return (<div onClick={()=>setAchModal(null)} style={{ position:'fixed',inset:0,zIndex:300,background:'rgba(0,0,0,.88)',display:'flex',alignItems:'center',justifyContent:'center',padding:20,backdropFilter:'blur(4px)' }}>
+                <div onClick={e=>e.stopPropagation()} style={{ background:'#08101e',border:`2px solid ${rar.color}`,borderRadius:8,padding:22,maxWidth:320,width:'100%',textAlign:'center',boxShadow:`0 0 40px ${rar.color}33` }}>
+                  <div style={{ fontSize:52,marginBottom:12 }}>{isHidden?'❓':a.icon}</div>
+                  <div style={{ ...pxFont, fontSize:7, color:rar.color, border:`1px solid ${rar.color}`, display:'inline-block', padding:'3px 8px', marginBottom:12 }}>{rar.label}</div>
+                  <div style={{ ...pxFont, fontSize:9, color:rar.color, textShadow:`0 0 10px ${rar.color}`, lineHeight:1.8, marginBottom:12 }}>{isHidden?'??? OCULTO ???':a.name}</div>
+                  <div style={{ ...bdyFont, fontSize:17, color:C.text, lineHeight:1.5, marginBottom:12 }}>{isHidden?'Sigue mejorando para desvelarlo.':a.desc}</div>
+                  <div style={{ ...pxFont, fontSize:7, color:a.unlocked?C.green:C.textDim, marginBottom:16 }}>{a.unlocked?'✦ LOGRADO':'🔒 BLOQUEADO'}</div>
+                  {a.prog&&(<><div style={{ height:7, background:'rgba(0,0,0,.5)', borderRadius:3, overflow:'hidden', marginBottom:6 }}><div style={{ height:'100%', width:Math.min(100,Math.round(a.prog[0]/a.prog[1]*100))+'%', background:rar.color, borderRadius:3 }} /></div><div style={{ ...bdyFont, fontSize:13, color:C.textDim, marginBottom:14 }}>{a.prog[0]} / {a.prog[1]}</div></>)}
+                  <button onClick={()=>setAchModal(null)} style={{ ...btnPx, width:'100%', color:rar.color, borderColor:rar.color, background:`${rar.color}11` }}>CERRAR</button>
+                </div>
+              </div>);
+            })()}
+          </div>);
+        })()}
+
       <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: "rgba(5,8,15,.92)", borderTop: `1px solid ${C.line}`, backdropFilter: "blur(6px)", display: "flex", maxWidth: 540, margin: "0 auto", paddingBottom: "env(safe-area-inset-bottom)" }}>
-        {[["objectives", "⚔", "OBJETIVOS"], ["tasks", "✎", "LIBRETA"], ["calendar", "▦", "CALEND."], ["forms", "☄", "FORMAS"], ["status", "◈", "ESTADO"]].map(([id, icon, txt]) => { const active = tab === id; return (<button key={id} onClick={() => { setTab(id); setAdding(null); if (sound) sfx.tab(); }} style={{ flex: 1, padding: "11px 0 13px", background: active ? "rgba(63,201,255,.1)" : "transparent", border: "none", borderTop: active ? `2px solid ${C.cyan}` : "2px solid transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>{/*nav*/}<span style={{ fontSize: 15, color: active ? C.cyan : C.textDim, textShadow: active ? `0 0 10px ${C.glow}` : "none" }}>{icon}</span><span style={{ ...pxFont, fontSize: 6, color: active ? C.cyan : C.textDim, letterSpacing: 0.5 }}>{txt}</span></button>); })}
+        {[["objectives", "⚔", "OBJETIVOS"], ["tasks", "✎", "LIBRETA"], ["calendar", "▦", "CALEND."], ["forms", "☄", "FORMAS"], ["status", "◈", "ESTADO"], ["logros", "★", "LOGROS"]].map(([id, icon, txt]) => { const active = tab === id; return (<button key={id} onClick={() => { setTab(id); setAdding(null); if (sound) sfx.tab(); }} style={{ flex: 1, padding: "11px 0 13px", background: active ? "rgba(63,201,255,.1)" : "transparent", border: "none", borderTop: active ? `2px solid ${C.cyan}` : "2px solid transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>{/*nav*/}<span style={{ fontSize: 15, color: active ? C.cyan : C.textDim, textShadow: active ? `0 0 10px ${C.glow}` : "none" }}>{icon}</span><span style={{ ...pxFont, fontSize: 6, color: active ? C.cyan : C.textDim, letterSpacing: 0.5 }}>{txt}</span></button>); })}
       </div>
 
       {/* MODALES */}
